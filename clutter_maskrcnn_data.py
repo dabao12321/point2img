@@ -22,11 +22,19 @@ from manipulation.utils import colorize_labels
 debug = True
 path = '/tmp/clutter_maskrcnn_data'
 num_images = 100
+num_col = 4
+num_row = 4
+num_cameras = num_col * num_row
 
 ycb = [
     "ball1/ball1.sdf", "ball2/ball2.sdf", "ball3/ball3.sdf",
     "bottle/bottle.sdf", "box1/box1.sdf", "box2/box2.sdf", "box3/box3.sdf",
-    "can1/can1.sdf", "can2/can2.sdf", "can3/can3.sdf", "cup1/cup1.sdf", "cup2/cup2.sdf", "mug/mug.sdf", "plate/plate.sdf"
+    "can1/can1.sdf", "can2/can2.sdf", "can3/can3.sdf", "cup1/cup1.sdf", "cup2/cup2.sdf", "mug/mug.sdf", "plate/plate.sdf",
+
+    # Balance out the distribution of items
+    "bottle/bottle.sdf", "bottle/bottle.sdf",
+    "mug/mug.sdf", "mug/mug.sdf",
+    "plate/plate.sdf", "plate/plate.sdf"
 ]
 
 if not debug:
@@ -52,7 +60,7 @@ def generate_image(image_num):
 
     for object_num in range(rng.integers(5,10)):
         this_object = ycb[rng.integers(len(ycb))]
-        # this_object = ycb[0]
+        # this_object = ycb[2]
         class_name = os.path.splitext(this_object)[0]
         sdf = "ycb/" + this_object
         instance = parser.AddModelFromFile(sdf, f"object{object_num}")
@@ -75,15 +83,14 @@ def generate_image(image_num):
         renderer, pydrake.geometry.render.MakeRenderEngineVtk(pydrake.geometry.render.RenderEngineVtkParams()))
     properties = pydrake.geometry.render.DepthCameraProperties(width=640,
                                         height=480,
-                                        fov_y=np.pi / 2.2,
+                                        fov_y=np.pi / 5,
                                         renderer_name=renderer,
                                         z_near=0.1,
                                         z_far=10.0)
+
     camera = builder.AddSystem(
         pydrake.systems.sensors.RgbdSensor(parent_id=scene_graph.world_frame_id(),
-                    X_PB=RigidTransform(
-                        RollPitchYaw(np.pi, 0, np.pi/2.0),
-                        [0, 0, 0.5]),
+                    X_PB=gen_camera_pose(),
                     properties=properties,
                     show_window=False))
     camera.set_name("rgbd_sensor")
@@ -99,18 +106,18 @@ def generate_image(image_num):
         context = simulator.get_mutable_context()
         plant_context = plant.GetMyContextFromRoot(context)
 
-        z = 0.1
+        z = 0.05
         for body_index in plant.GetFloatingBaseBodies():
             tf = RigidTransform(
                     pydrake.math.UniformlyRandomRotationMatrix(generator),  
-                    [rng.uniform(-.1,.1), rng.uniform(-.1, .1), z])
+                    [rng.uniform(-.1, .1), rng.uniform(-.1, .1), z])
             plant.SetFreeBodyPose(plant_context, 
                                   plant.get_body(body_index),
                                   tf)
             z += 0.05
 
         try:
-            simulator.AdvanceTo(2)
+            simulator.AdvanceTo(1)
             break
         except RuntimeError:
             # I've chosen an aggressive simulation time step which works most 
@@ -121,17 +128,34 @@ def generate_image(image_num):
     label_image = diagram.GetOutputPort("label_image").Eval(context)
 
     if debug: 
-        plt.figure()
-        plt.subplot(121)
-        plt.imshow(color_image.data)
-        plt.axis('off')
-        plt.subplot(122)
-        plt.imshow(colorize_labels(label_image.data))
-        plt.axis('off')
+        # plt.figure()
+        fig, axs = plt.subplots(num_row, num_col, sharex='col', sharey='row')
+        for i in range(num_row):
+            for j in range(num_col//2):
+                axs[i, 2*j].imshow(color_image.data)
+                axs[i, 2*j+1].imshow(colorize_labels(label_image.data))
+                axs[i, 2*j].axis('off')
+                axs[i, 2*j+1].axis('off')
+        # plt.subplot(121)
+        # plt.imshow(color_image.data)
+        # plt.axis('off')
+        # plt.subplot(122)
+        # plt.imshow(colorize_labels(label_image.data))
+        # plt.axis('off')
         plt.show()
     else:
         Image.fromarray(color_image.data).save(f"{filename_base}.png")
         np.save(f"{filename_base}_mask", label_image.data)
+
+def gen_camera_pose():
+    # Generate vector with length l, set as position of camera (x, y, z)
+    # Calculate angle such that camera points into the center of the table (rpy)
+    
+    camera_pose = RigidTransform(RollPitchYaw(np.pi, 0, 0), [0, 0, 1])
+    #  rng.uniform(-np.pi/2 , np.pi/2)
+    camera_rotation = RigidTransform(RollPitchYaw(rng.uniform(np.pi/6, 5 * np.pi/12), 0,  rng.uniform(0, 2 * np.pi)), [0, 0, 0])
+    final_pose = camera_rotation.multiply(camera_pose)
+    return final_pose
 
 if debug:
     for image_num in range(num_images):
