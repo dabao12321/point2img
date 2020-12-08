@@ -224,7 +224,7 @@
         <pose>0 0 0.736 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.7112 0.762 0.057</size>
+            <size>2 2 0.057</size>
           </box>
         </geometry>
         <material>
@@ -249,7 +249,7 @@
         <pose>0 0 0.736 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.7112 0.762 0.057</size>
+            <size>2 2 0.057</size>
           </box>
         </geometry>
         <surface>
