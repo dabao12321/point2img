@@ -19,7 +19,7 @@
         <geometry>
           <mesh>
             <!-- Use a downsampled mesh for collisions -->
-            <uri>downsampled.obj</uri>
+            <uri>textured.obj</uri>
 	        </mesh>
         </geometry>
         <surface>

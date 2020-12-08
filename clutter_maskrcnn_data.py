@@ -19,7 +19,7 @@ from pydrake.all import RigidTransform, RollPitchYaw
 # from manipulation.scenarios import ycb
 from manipulation.utils import colorize_labels
 
-debug = False
+debug = True
 path = '/tmp/clutter_maskrcnn_data'
 num_batches = 10
 num_col = 6
@@ -103,7 +103,7 @@ def generate_image(image_num):
         renderer, pydrake.geometry.render.MakeRenderEngineVtk(pydrake.geometry.render.RenderEngineVtkParams()))
     properties = pydrake.geometry.render.DepthCameraProperties(width=640,
                                         height=480,
-                                        fov_y=np.pi / 5,
+                                        fov_y=np.pi / 4,
                                         renderer_name=renderer,
                                         z_near=0.1,
                                         z_far=10.0)
