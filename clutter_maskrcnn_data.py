@@ -19,12 +19,13 @@ from pydrake.all import RigidTransform, RollPitchYaw
 # from manipulation.scenarios import ycb
 from manipulation.utils import colorize_labels
 
-debug = True
+debug = False
 path = '/tmp/clutter_maskrcnn_data'
-num_images = 100
-num_col = 4
-num_row = 4
-num_cameras = num_col * num_row
+num_batches = 10
+num_col = 6
+num_row = 6
+num_cameras = num_col * num_row // 2
+num_images = num_batches * num_cameras
 
 ycb = [
     "ball1/ball1.sdf", "ball2/ball2.sdf", "ball3/ball3.sdf",
@@ -36,6 +37,22 @@ ycb = [
     "mug/mug.sdf", "mug/mug.sdf",
     "plate/plate.sdf", "plate/plate.sdf"
 ]
+
+name_to_class_id = dict()
+for b in ["ball1/ball1", "ball2/ball2", "ball3/ball3"]:
+    name_to_class_id[b] = 1
+name_to_class_id["plate/plate"] = 2
+name_to_class_id["mug/mug"] = 3
+for b in ["box1/box1", "box2/box2", "box3/box3"]:
+    name_to_class_id[b] = 4
+name_to_class_id["bottle/bottle"] = 5
+for c in ["cup1/cup1", "cup2/cup2"]:
+    name_to_class_id[c] = 6
+for c in ["can1/can1", "can2/can2", "can3/can3"]:
+    name_to_class_id[c] = 7
+
+instance_id_to_class_id = dict()
+
 
 if not debug:
     if os.path.exists(path):
@@ -71,12 +88,15 @@ def generate_image(image_num):
             frame_id, pydrake.geometry.Role.kPerception)
         for geom_id in geometry_ids:
             instance_id_to_class_name[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = class_name
-
+            instance_id_to_class_id[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = name_to_class_id[class_name]
     plant.Finalize()
 
+    # print(instance_id_to_class_id)
+
     if not debug:
-        with open(filename_base + ".json", "w") as f:
-            json.dump(instance_id_to_class_name, f)
+        # with open(filename_base + ".json", "w") as f:
+        #     json.dump(instance_id_to_class_name, f)
+        pass
 
     renderer = "my_renderer"
     scene_graph.AddRenderer(
@@ -88,16 +108,17 @@ def generate_image(image_num):
                                         z_near=0.1,
                                         z_far=10.0)
 
-    camera = builder.AddSystem(
-        pydrake.systems.sensors.RgbdSensor(parent_id=scene_graph.world_frame_id(),
-                    X_PB=gen_camera_pose(),
-                    properties=properties,
-                    show_window=False))
-    camera.set_name("rgbd_sensor")
-    builder.Connect(scene_graph.get_query_output_port(),
-                    camera.query_object_input_port())
-    builder.ExportOutput(camera.color_image_output_port(), "color_image")
-    builder.ExportOutput(camera.label_image_output_port(), "label_image")
+    for i in range(num_cameras):
+        camera = builder.AddSystem(
+            pydrake.systems.sensors.RgbdSensor(parent_id=scene_graph.world_frame_id(),
+                        X_PB=gen_camera_pose(),
+                        properties=properties,
+                        show_window=False))
+        camera.set_name("rgbd_sensor" + str(i))
+        builder.Connect(scene_graph.get_query_output_port(),
+                        camera.query_object_input_port())
+        builder.ExportOutput(camera.color_image_output_port(), "color_image" + str(i))
+        builder.ExportOutput(camera.label_image_output_port(), "label_image" + str(i))
 
     diagram = builder.Build()
 
@@ -117,35 +138,41 @@ def generate_image(image_num):
             z += 0.05
 
         try:
-            simulator.AdvanceTo(1)
+            simulator.AdvanceTo(2)
             break
         except RuntimeError:
             # I've chosen an aggressive simulation time step which works most 
             # of the time, but can fail occasionally.
             pass
 
-    color_image = diagram.GetOutputPort("color_image").Eval(context)
-    label_image = diagram.GetOutputPort("label_image").Eval(context)
+    color_images = [diagram.GetOutputPort("color_image" + str(i)).Eval(context) for i in range(num_cameras)]
+    label_images = [diagram.GetOutputPort("label_image" + str(i)).Eval(context) for i in range(num_cameras)]
+
+    color_images_data = np.array([c.data for c in color_images])
+    label_images_data = np.array([l.data for l in label_images])
+    
+    adj_label_images_data = np.zeros_like(label_images_data)
+    
+    for inst_id, class_id in instance_id_to_class_id.items():
+        adj_label_images_data[label_images_data==inst_id] = class_id
 
     if debug: 
         # plt.figure()
         fig, axs = plt.subplots(num_row, num_col, sharex='col', sharey='row')
         for i in range(num_row):
             for j in range(num_col//2):
-                axs[i, 2*j].imshow(color_image.data)
-                axs[i, 2*j+1].imshow(colorize_labels(label_image.data))
+                idx = i * num_col//2 + j
+                axs[i, 2*j].imshow(color_images_data[idx])
+                axs[i, 2*j+1].imshow(colorize_labels(adj_label_images_data[idx]))
                 axs[i, 2*j].axis('off')
                 axs[i, 2*j+1].axis('off')
-        # plt.subplot(121)
-        # plt.imshow(color_image.data)
-        # plt.axis('off')
-        # plt.subplot(122)
-        # plt.imshow(colorize_labels(label_image.data))
-        # plt.axis('off')
+                
         plt.show()
     else:
-        Image.fromarray(color_image.data).save(f"{filename_base}.png")
-        np.save(f"{filename_base}_mask", label_image.data)
+        print(f"Saving batch {filename_base}")
+        for idx in range(num_cameras):
+            Image.fromarray(color_images_data[idx]).save(f"{filename_base}_{idx}.png")
+            np.save(f"{filename_base}_{idx}_mask", adj_label_images_data[idx])
 
 def gen_camera_pose():
     # Generate vector with length l, set as position of camera (x, y, z)
@@ -161,7 +188,9 @@ if debug:
     for image_num in range(num_images):
         generate_image(image_num)
 else:
-    pool = multiprocessing.Pool(10)
-    list(tqdm(pool.imap(generate_image, range(num_images)), total=num_images))
-    pool.close()
-    pool.join()
+    # pool = multiprocessing.Pool(10)
+    # list(tqdm(pool.imap(generate_image, range(num_images)), total=num_images))
+    # pool.close()
+    # pool.join()
+    for i in range(num_batches):
+        generate_image(i)
