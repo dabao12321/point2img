@@ -19,9 +19,9 @@ from pydrake.all import RigidTransform, RollPitchYaw
 # from manipulation.scenarios import ycb
 from manipulation.utils import colorize_labels
 
-debug = True
+debug = False
 path = '/tmp/clutter_maskrcnn_data'
-num_batches = 10
+num_batches = 20
 num_col = 6
 num_row = 6
 num_cameras = num_col * num_row // 2
@@ -38,6 +38,10 @@ ycb = [
     "plate/plate.sdf", "plate/plate.sdf"
 ]
 
+others = ["011_banana/banana.sdf", "019_pitcher_base/pitcher_base.sdf", "035_power_drill/power_drill.sdf", "038_padlock/padlock.sdf"]
+
+ycb += others
+
 name_to_class_id = dict()
 for b in ["ball1/ball1", "ball2/ball2", "ball3/ball3"]:
     name_to_class_id[b] = 1
@@ -50,6 +54,10 @@ for c in ["cup1/cup1", "cup2/cup2"]:
     name_to_class_id[c] = 6
 for c in ["can1/can1", "can2/can2", "can3/can3"]:
     name_to_class_id[c] = 7
+name_to_class_id["table_surface"] = 8
+for c in others:
+    c_name = c.split(".")[0]
+    name_to_class_id[c_name] = 9
 
 instance_id_to_class_id = dict()
 
@@ -69,11 +77,13 @@ def generate_image(image_num):
     builder = pydrake.systems.framework.DiagramBuilder()
     plant, scene_graph = pydrake.multibody.plant.AddMultibodyPlantSceneGraph(builder, time_step=0.0005)
     parser = pydrake.multibody.parsing.Parser(plant)
-    parser.AddModelFromFile("ycb/table_surface.sdf")
+    instance = parser.AddModelFromFile("ycb/table_surface.sdf")
     plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("top_center"))
     inspector = scene_graph.model_inspector()
-
-    instance_id_to_class_name = dict()
+    frame_id = plant.GetBodyFrameIdOrThrow(plant.GetBodyIndices(instance)[0])
+    geometry_ids = inspector.GetGeometries(frame_id, pydrake.geometry.Role.kPerception)
+    for geom_id in geometry_ids:
+        instance_id_to_class_id[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = name_to_class_id["table_surface"]
 
     for object_num in range(rng.integers(5,10)):
         this_object = ycb[rng.integers(len(ycb))]
@@ -87,8 +97,8 @@ def generate_image(image_num):
         geometry_ids = inspector.GetGeometries(
             frame_id, pydrake.geometry.Role.kPerception)
         for geom_id in geometry_ids:
-            instance_id_to_class_name[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = class_name
-            instance_id_to_class_id[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = name_to_class_id[class_name]
+            if class_name in name_to_class_id:
+                instance_id_to_class_id[int(inspector.GetPerceptionProperties(geom_id).GetProperty("label", "id"))] = name_to_class_id[class_name]
     plant.Finalize()
 
     # print(instance_id_to_class_id)
@@ -175,11 +185,12 @@ def generate_image(image_num):
             np.save(f"{filename_base}_{idx}_mask", adj_label_images_data[idx])
 
 def gen_camera_pose():
-    # Generate vector with length l, set as position of camera (x, y, z)
-    # Calculate angle such that camera points into the center of the table (rpy)
-    
-    camera_pose = RigidTransform(RollPitchYaw(np.pi, 0, 0), [0, 0, 1])
-    #  rng.uniform(-np.pi/2 , np.pi/2)
+
+    # Generate camera pointing down at a point on the table    
+    x_rand, y_rand = rng.uniform(-0.5, 0.5, size=(2,))
+    camera_pose = RigidTransform(RollPitchYaw(np.pi, 0, 0), [x_rand, y_rand, 1])
+
+    # Generate a rpy rotation to pitch it off center
     camera_rotation = RigidTransform(RollPitchYaw(rng.uniform(np.pi/6, 5 * np.pi/12), 0,  rng.uniform(0, 2 * np.pi)), [0, 0, 0])
     final_pose = camera_rotation.multiply(camera_pose)
     return final_pose
